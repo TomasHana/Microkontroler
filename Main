@@ -1,0 +1,183 @@
+#include "map_shield.h"
+#include <stdio.h>
+#include "stm_core.h"
+#include "stm_usart.h"
+
+volatile uint32_t _ticks = 0;
+
+void SysTick_Handler(void) {
+	_ticks++;
+}
+
+// seriová komunikace
+
+/*int Usart2Send(char c) {
+	while (!(USART2->SR & USART_SR_TXE))
+		; // cekej dokud nenivolny TDR
+	USART2->DR = c; // zapisdo TDR k odeslani
+	return c;
+}
+
+int Usart2Recv(void) 
+	while (!(USART2->SR & USART_SR_RXNE))
+		// cekej dokud neprijde
+		;
+	return USART2->DR; // vycti a vrat jako hodnotu
+}
+
+bool IsUsart2Recv(void) // priznak, ze je necov bufferu
+{
+	return (USART2->SR & USART_SR_RXNE) != 0;
+// podminkavynutitrue/falsevysledek
+}*/
+
+// Shift register
+void InitDir(void) {
+	STM_SetPinGPIO(GPIOA, 6, ioPortOutputPP); //RCLK
+	GPIOWrite(GPIOA, 6, 0);
+
+	STM_SetPinGPIO(GPIOA, 8, ioPortOutputPP); //OE
+	GPIOWrite(GPIOA, 8, 0);
+
+	STM_SetPinGPIO(GPIOB, 5, ioPortOutputPP); //SRCLK
+	GPIOWrite(GPIOB, 5, 0);
+
+	STM_SetPinGPIO(GPIOA, 9, ioPortOutputPP); //SER
+}
+
+void WriteDir(uint8_t val) // val může být 00000100 -> forvard nebo 00000001 -> backward
+{
+
+	for (int i = 0; i < 8; i++) {
+		GPIOWrite(GPIOA, 9, (val & 0x80) != 0); //maska 1000 0000
+
+		GPIOWrite(GPIOB, 5, 1); //puls na CLK
+		GPIOWrite(GPIOB, 5, 0);
+
+		val <<= 1;//val = val<<1
+	}
+	GPIOWrite(GPIOA, 6, 1); // puls na LE
+	GPIOWrite(GPIOA, 6, 0);
+
+}
+/*
+int __io_putchar(int ch) {
+	return Usart2Send(ch);
+}
+
+int __io_getchar(void) {
+	return Usart2Recv();
+}
+*/
+
+int main(void) {
+	uint32_t apb1 = SystemCoreClock;
+	//uint8_t val=0x20; // 0000 0100    32 po směr
+	uint8_t val=0x80;   // protisměr
+//system clock
+	//uint8_t speed=0x80;
+	SystemCoreClockUpdate();
+	SysTick_Config(SystemCoreClock / 1000 - 1);
+
+//Nastavení usartu
+	if (!(RCC->APB1ENR & RCC_APB1ENR_USART2EN)) // nenipovolen USART2
+	{
+		RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
+		RCC->APB1RSTR |= RCC_APB1RSTR_USART2RST;
+		RCC->APB1RSTR &= ~RCC_APB1RSTR_USART2RST;
+	}
+	USART2->CR1 = USART_CR1_RE | USART_CR1_TE; // potrebapovoleni prijmua vysilani
+	USART2->CR2 = 0; // nic specialniho
+	USART2->CR3 = 0; // nic specialniho
+
+	//TODO doplnit vypocetBRR podle pozadovanehoa podle clocku
+	USART2->BRR = 0x1A1; // rychlost 38400 pri16MHz -spocitanopredem
+	USART2->CR1 |= USART_CR1_UE;
+
+	// zrusitbufferovanivystupui vstupu
+	setvbuf(stdout, NULL, _IONBF, 0);
+	setvbuf(stdin, NULL, _IONBF, 0);
+
+	InitDir();
+	WriteDir(val);
+	//GPIOWrite(GPIOB, 10, 1);
+	//GPIOWrite(GPIOB, 10, 1);
+	//PWM
+	if (!(RCC->APB1ENR & RCC_APB1ENR_TIM2EN)) {
+		RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+		RCC->APB1RSTR |= RCC_APB1RSTR_TIM2RST;
+		RCC->APB1RSTR &= ~RCC_APB1RSTR_TIM2RST;
+	}
+
+	TIM2->CR1 = 0
+		| TIM_CR1_ARPE;
+	TIM2->CR2=0;
+
+	TIM2->PSC = apb1/ 1E6 -1;
+	TIM2->ARR=255;	//8bit
+
+	TIM2->CR1=TIM_CR1_CEN;
+	//
+	//TIM2->BDTR |= TIM_BDTR_MOE;
+	//TODO doplnit piny
+	STM_SetPinGPIO(GPIOB, 10, ioPortAlternatePP);
+	STM_SetAFGPIO(GPIOB, 10, 1);
+
+	TIM2->CCMR2 &= ~TIM_CCMR2_OC3M;
+	TIM2->CCMR2 |= TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3M_1;
+
+	TIM2->CCER |= TIM_CCER_CC3E;
+	TIM2->CCR3 =128;
+
+
+
+
+
+/*
+	if (IsUsart2Recived()) {
+		    char x = Usart2Recived();
+
+		    printf("Prijat znak: %c (0x%X) \n", x,x);
+
+	}*/
+
+
+
+
+
+
+
+
+
+
+
+
+//Nastaveni pinu TODO správný pin
+	STM_SetPinGPIO(VETRNIK_OUT, ioPortOutputPP);
+
+
+
+//pripojení Shift reg na L293D
+
+	/*
+	 Přidat vzorkovčku
+
+	 1 otáčka je 8 bitů:
+
+	 */
+
+	//Pro otáčky
+	bool oldStav = true;
+	while (1) {
+   
+
+		//hranový detektor
+		bool bb = GPIORead(VETRNIK_OUT);
+		if (oldStav != bb) {
+			oldStav = bb; //nastaveni aktualni na starou pro dalsi krok
+			putchar(bb); // Výpis 1/0
+		}
+
+	}
+}
+
